@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- Mobile-first: lock the viewport so this feels like an app on Android Chrome.
+     viewport-fit=cover lets us pad around notches/gesture bars later if needed. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#4C5FD5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#121420" media="(prefers-color-scheme: dark)">
+<!-- PWA wiring (Phase 2). Relative paths so it works from a GitHub Pages subpath. -->
+<link rel="manifest" href="./manifest.json">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
+<title>SetList</title>
+<style>
+  /* ---------------------------------------------------------------------------
+     Twilight palette (indigo + mist). Light + dark, switched by the OS setting.
+     Everything reads off these variables so a future re-theme is one block.
+  --------------------------------------------------------------------------- */
+  :root {
+    --bg: #F5F6FA;
+    --surface: #FFFFFF;
+    --text: #1A1D2B;
+    --muted: #5A6072;
+    --accent: #4C5FD5;
+    --accent-text: #FFFFFF;
+    --line: #E0E2EC;
+    --danger: #B23A48;
+    --radius: 14px;
+    --tap: 48px;          /* comfy minimum tap target, a bit above the 44px floor */
+    --maxw: 560px;        /* keep things readable; phone-width but caps on desktop */
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121420;
+      --surface: #1B1E2E;
+      --text: #E7E9F2;
+      --muted: #9AA0B5;
+      --accent: #8B97F0;
+      --accent-text: #121420;
+      --line: #2A2E42;
+      --danger: #E2828E;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body { height: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    /* System stack on purpose: instant, offline, no CDN font to fetch. */
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+      Helvetica, Arial, sans-serif;
+    font-size: 17px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    /* leave room for the fixed bottom nav */
+    padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Calm, cheap transitions only — and none if the user asked for less motion. */
+  .screen { transition: opacity .18s ease; }
+  @media (prefers-reduced-motion: reduce) {
+    .screen { transition: none; }
+  }
+
+  .wrap {
+    max-width: var(--maxw);
+    margin: 0 auto;
+    padding: 20px 16px 8px;
+  }
+
+  /* --- App header ---------------------------------------------------------- */
+  header.app {
+    max-width: var(--maxw);
+    margin: 0 auto;
+    padding: 18px 16px 4px;
+  }
+  header.app h1 {
+    font-size: 22px;
+    font-weight: 600;
+    margin: 0;
+    letter-spacing: .2px;
+  }
+  header.app .sub {
+    color: var(--muted);
+    font-size: 14px;
+    margin-top: 2px;
+  }
+
+  /* --- Screens: only one visible at a time -------------------------------- */
+  .screen[hidden] { display: none; }
+
+  h2.section {
+    font-size: 15px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .6px;
+    color: var(--muted);
+    margin: 4px 2px 10px;
+  }
+
+  /* --- Cards (one per due session / exercise) ----------------------------- */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    margin-bottom: 12px;
+  }
+
+  .card .row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+  .card .name { font-size: 18px; font-weight: 600; }
+  .card .time { color: var(--muted); font-size: 15px; white-space: nowrap; }
+
+  /* Targets use tabular numerals so "2 × 10" and "3 × 10" line up cleanly. */
+  .target {
+    font-variant-numeric: tabular-nums;
+    color: var(--muted);
+    font-size: 15px;
+    margin-top: 2px;
+  }
+  .target .x { opacity: .6; padding: 0 2px; }
+
+  /* --- Buttons ------------------------------------------------------------- */
+  button {
+    font: inherit;
+    cursor: pointer;
+    border-radius: 10px;
+    min-height: var(--tap);
+    border: 1px solid transparent;
+    background: none;
+    color: var(--text);
+    padding: 0 16px;
+  }
+  button:active { transform: translateY(1px); }
+
+  .btn-primary {
+    background: var(--accent);
+    color: var(--accent-text);
+    font-weight: 600;
+    border-color: var(--accent);
+  }
+  .btn-ghost {
+    background: transparent;
+    color: var(--muted);
+    border-color: var(--line);
+  }
+  .btn-danger {
+    color: var(--danger);
+    border-color: var(--line);
+    background: transparent;
+  }
+
+  /* The in-session Done button is the star — make it big and obvious. */
+  .session-actions { display: flex; gap: 10px; margin-top: 14px; }
+  .session-actions .btn-primary { flex: 1; min-height: 56px; font-size: 18px; }
+  .session-actions .btn-ghost { min-width: 96px; }
+
+  /* Done / skipped states soften the card and strike the title. */
+  .card.marked .name { color: var(--muted); }
+  .card.marked.done .name { text-decoration: line-through; text-decoration-thickness: 1px; }
+  .card.marked.skipped .name { text-decoration: line-through; text-decoration-thickness: 1px; }
+  .status-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 14px; font-weight: 600; margin-top: 12px;
+  }
+  .status-pill.done { color: var(--accent); }
+  .status-pill.skipped { color: var(--muted); }
+  .status-line { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
+  .link {
+    background: none; border: none; color: var(--muted);
+    text-decoration: underline; min-height: auto; padding: 6px 0; font-size: 14px;
+  }
+
+  /* --- Empty states -------------------------------------------------------- */
+  .empty {
+    text-align: center;
+    color: var(--muted);
+    padding: 40px 20px;
+  }
+  .empty p { margin: 8px 0; }
+
+  /* --- Exercises list ------------------------------------------------------ */
+  .ex-item { width: 100%; text-align: left; display: block; padding: 0; border: none; background: none; }
+  .ex-item .card { margin-bottom: 12px; }
+  .ex-summary { color: var(--muted); font-size: 14px; margin-top: 4px; }
+  .ex-summary.none { font-style: italic; }
+
+  /* --- Edit form ----------------------------------------------------------- */
+  label.field { display: block; margin: 16px 2px 6px; font-size: 14px; font-weight: 600; color: var(--muted); }
+  input[type="text"], input[type="number"], input[type="time"] {
+    font: inherit;
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--text);
+    min-height: var(--tap);
+  }
+  input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  /* Day-of-week chips */
+  .days { display: flex; gap: 6px; flex-wrap: wrap; }
+  .day-chip {
+    flex: 1 1 0;
+    min-width: 40px;
+    min-height: var(--tap);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface);
+    color: var(--muted);
+    font-weight: 600;
+    padding: 0;
+  }
+  .day-chip[aria-pressed="true"] {
+    background: var(--accent);
+    color: var(--accent-text);
+    border-color: var(--accent);
+  }
+
+  .times-list { display: flex; flex-direction: column; gap: 10px; }
+  .time-row { display: flex; gap: 8px; align-items: center; }
+  .time-row input { flex: 1; }
+
+  .setsreps { display: flex; gap: 12px; }
+  .setsreps > div { flex: 1; }
+
+  /* Toggle for "is this exercise scheduled at all?" */
+  .toggle-row {
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 12px 16px; margin-top: 8px;
+  }
+  .toggle-row .lbl { font-weight: 600; }
+  .switch { position: relative; width: 52px; height: 30px; flex: none; }
+  .switch input { opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+  .switch .track {
+    position: absolute; inset: 0; border-radius: 999px;
+    background: var(--line); transition: background .15s ease; pointer-events: none;
+  }
+  .switch .thumb {
+    position: absolute; top: 3px; left: 3px; width: 24px; height: 24px;
+    border-radius: 50%; background: var(--surface); box-shadow: 0 1px 2px rgba(0,0,0,.3);
+    transition: transform .15s ease; pointer-events: none;
+  }
+  .switch input:checked ~ .track { background: var(--accent); }
+  .switch input:checked ~ .thumb { transform: translateX(22px); }
+
+  .form-actions { display: flex; gap: 10px; margin: 24px 0 8px; }
+  .form-actions .btn-primary { flex: 1; }
+
+  .add-btn { width: 100%; margin-top: 4px; }
+
+  .hint { color: var(--muted); font-size: 13px; margin: 8px 2px; }
+
+  /* --- Bottom navigation --------------------------------------------------- */
+  nav.tabs {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    display: flex; justify-content: center; gap: 4px;
+    background: var(--surface);
+    border-top: 1px solid var(--line);
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom, 0px));
+    z-index: 10;
+  }
+  nav.tabs button {
+    flex: 1; max-width: 200px; min-height: 52px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 2px; color: var(--muted); font-size: 12px; font-weight: 600; border-radius: 10px;
+  }
+  nav.tabs button[aria-current="page"] { color: var(--accent); }
+  nav.tabs .ico { font-size: 20px; line-height: 1; }
+</style>
+</head>
+<body>
+
+<header class="app">
+  <h1>SetList</h1>
+  <div class="sub" id="appSub"></div>
+</header>
+
+<!-- ===================== TODAY (home) ===================== -->
+<section class="screen" id="screen-today">
+  <div class="wrap">
+    <h2 class="section">Today</h2>
+    <div id="todayList"></div>
+  </div>
+</section>
+
+<!-- ===================== EXERCISES ===================== -->
+<section class="screen" id="screen-exercises" hidden>
+  <div class="wrap">
+    <h2 class="section">Exercises</h2>
+    <div id="exList"></div>
+    <button class="btn-ghost add-btn" id="addExerciseBtn">+ Add exercise</button>
+  </div>
+</section>
+
+<!-- ===================== EDIT EXERCISE ===================== -->
+<section class="screen" id="screen-edit" hidden>
+  <div class="wrap">
+    <h2 class="section" id="editTitle">Edit exercise</h2>
+
+    <label class="field" for="exName">Name</label>
+    <input type="text" id="exName" placeholder="e.g. Push-ups" autocomplete="off">
+
+    <div class="toggle-row">
+      <span class="lbl">Scheduled</span>
+      <label class="switch">
+        <input type="checkbox" id="exScheduled">
+        <span class="track"></span>
+        <span class="thumb"></span>
+      </label>
+    </div>
+    <p class="hint" id="schedHint">Off = the exercise exists but won't show up in Today (sitting idle).</p>
+
+    <!-- Everything below is the schedule; hidden when "Scheduled" is off. -->
+    <div id="scheduleFields">
+      <label class="field">Days</label>
+      <div class="days" id="dayChips"></div>
+
+      <label class="field">Times <span style="font-weight:400;color:var(--muted)">(up to 2)</span></label>
+      <div class="times-list" id="timesList"></div>
+      <button class="btn-ghost" id="addTimeBtn" style="margin-top:10px;width:100%">+ Add a second time</button>
+
+      <div class="setsreps">
+        <div>
+          <label class="field" for="exSets">Sets</label>
+          <input type="number" id="exSets" min="1" max="99" inputmode="numeric" value="2">
+        </div>
+        <div>
+          <label class="field" for="exReps">Reps</label>
+          <input type="number" id="exReps" min="1" max="999" inputmode="numeric" value="10">
+        </div>
+      </div>
+    </div>
+
+    <div class="form-actions">
+      <button class="btn-primary" id="saveExerciseBtn">Save</button>
+      <button class="btn-ghost" id="cancelEditBtn">Cancel</button>
+    </div>
+    <button class="btn-danger" id="deleteExerciseBtn" style="width:100%;margin-top:4px" hidden>Delete exercise</button>
+  </div>
+</section>
+
+<!-- ===================== BOTTOM NAV ===================== -->
+<nav class="tabs">
+  <button data-go="today" aria-current="page"><span class="ico">◷</span>Today</button>
+  <button data-go="exercises"><span class="ico">≣</span>Exercises</button>
+</nav>
+
+<script>
+"use strict";
+/* ===========================================================================
+   SetList — Phase 1 core app.
+   One file on purpose (see Documentation/ARCHITECTURE.md). Organised into small
+   module-objects: store, exercises, schedule, sessions, ui, boot.
+   No framework, no build step, no dependencies.
+=========================================================================== */
+
+/* ---------------------------------------------------------------------------
+   store — the only thing that talks to localStorage. Keep this the single seam
+   so we can swap to IndexedDB later without touching the rest of the app.
+--------------------------------------------------------------------------- */
+const store = (() => {
+  const KEYS = {
+    exercises: "setlist.exercises",
+    records: "setlist.records",
+    settings: "setlist.settings",
+    schemaVersion: "setlist.schemaVersion",
+  };
+  const SCHEMA_VERSION = 1;
+
+  // Read + parse a key, falling back to the given default if it's missing or
+  // somehow corrupt. Better to start clean than to throw on boot.
+  function read(key, fallback) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw == null) return fallback;
+      return JSON.parse(raw);
+    } catch (err) {
+      console.warn("store: couldn't parse", key, "— using default", err);
+      return fallback;
+    }
+  }
+
+  function write(key, value) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch (err) {
+      // Quota or private-mode failures land here. Nothing we can do but warn.
+      console.error("store: write failed for", key, err);
+    }
+  }
+
+  return {
+    KEYS,
+    getExercises: () => read(KEYS.exercises, []),
+    setExercises: (list) => write(KEYS.exercises, list),
+    getRecords: () => read(KEYS.records, []),
+    setRecords: (list) => write(KEYS.records, list),
+    getSettings: () => read(KEYS.settings, {}),
+    setSettings: (s) => write(KEYS.settings, s),
+    // Stamp the schema version on first run so future migrations have a marker.
+    ensureSchema() {
+      const v = read(KEYS.schemaVersion, null);
+      if (v == null) write(KEYS.schemaVersion, SCHEMA_VERSION);
+    },
+  };
+})();
+
+/* ---------------------------------------------------------------------------
+   Small shared helpers — ids, local dates/times. Kept tiny and pure.
+--------------------------------------------------------------------------- */
+const util = {
+  // Prefer the platform UUID; fall back to a good-enough random id on old engines.
+  id(prefix) {
+    let body;
+    if (window.crypto && crypto.randomUUID) {
+      body = crypto.randomUUID();
+    } else {
+      body = "xxxxxxxxxxxx".replace(/x/g, () =>
+        ((Math.random() * 16) | 0).toString(16)
+      );
+    }
+    return prefix + "_" + body;
+  },
+
+  // Local YYYY-MM-DD (NOT UTC — a 7am session belongs to the user's local day).
+  localDate(d = new Date()) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  },
+
+  // Turn an "HH:MM" 24h string into something friendly like "7:00 AM".
+  prettyTime(hhmm) {
+    const [hStr, mStr] = hhmm.split(":");
+    let h = parseInt(hStr, 10);
+    const m = mStr;
+    const ampm = h >= 12 ? "PM" : "AM";
+    h = h % 12;
+    if (h === 0) h = 12;
+    return `${h}:${m} ${ampm}`;
+  },
+
+  nowIso: () => new Date().toISOString(),
+};
+
+/* ---------------------------------------------------------------------------
+   exercises — CRUD + validation for exercises and their embedded schedules.
+   A schedule of null means "exists but not scheduled" (the idle Squats case).
+--------------------------------------------------------------------------- */
+const exercises = (() => {
+  function all() {
+    return store.getExercises();
+  }
+
+  function byId(id) {
+    return all().find((e) => e.id === id) || null;
+  }
+
+  // Build a fresh exercise. Starts unscheduled; the edit screen fills the rest.
+  function create(name) {
+    const now = util.nowIso();
+    const ex = {
+      id: util.id("exr"),
+      name: name.trim(),
+      schedule: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const list = all();
+    list.push(ex);
+    store.setExercises(list);
+    return ex;
+  }
+
+  // Persist edits. `patch` may include name and/or schedule (null clears it).
+  function update(id, patch) {
+    const list = all();
+    const i = list.findIndex((e) => e.id === id);
+    if (i === -1) return null;
+    list[i] = { ...list[i], ...patch, updatedAt: util.nowIso() };
+    store.setExercises(list);
+    return list[i];
+  }
+
+  function remove(id) {
+    store.setExercises(all().filter((e) => e.id !== id));
+    // Note: we deliberately leave SessionRecords alone. They carry their own
+    // name/target snapshots so history survives a deleted exercise.
+  }
+
+  // Normalise a schedule object coming out of the form into clean data.
+  function makeSchedule({ days, times, sets, reps }) {
+    return {
+      days: [...days].sort((a, b) => a - b),
+      times: [...times].sort(), // "HH:MM" sorts correctly as plain strings
+      sets: Math.max(1, parseInt(sets, 10) || 1),
+      reps: Math.max(1, parseInt(reps, 10) || 1),
+    };
+  }
+
+  return { all, byId, create, update, remove, makeSchedule };
+})();
+
+/* ---------------------------------------------------------------------------
+   schedule — the pure due-session computation described in ARCHITECTURE.
+   Input: a local date string, the exercises, and the records. Output: a sorted
+   list of due slots, each tagged done / skipped / pending. No side effects,
+   nothing read from storage in here — so it's trivially testable and reused.
+--------------------------------------------------------------------------- */
+const schedule = (() => {
+  // Weekday index for a YYYY-MM-DD string, in local time. 0=Sun … 6=Sat.
+  function weekdayOf(dateStr) {
+    const [y, m, d] = dateStr.split("-").map(Number);
+    return new Date(y, m - 1, d).getDay();
+  }
+
+  // The heart of it. Pure: (dateStr, exercises, records) -> due slots.
+  function dueSessions(dateStr, exerciseList, recordList) {
+    const weekday = weekdayOf(dateStr);
+    const slots = [];
+
+    for (const ex of exerciseList) {
+      const sch = ex.schedule;
+      if (!sch) continue;                       // unscheduled → never due
+      if (!sch.days.includes(weekday)) continue; // not one of its days
+
+      for (const time of sch.times) {
+        // Does a record already exist for this exact (exercise, date, time)?
+        const rec = recordList.find(
+          (r) => r.exerciseId === ex.id && r.date === dateStr && r.time === time
+        );
+        slots.push({
+          exerciseId: ex.id,
+          exerciseName: ex.name,
+          time,
+          // Carry the CURRENT target — editing the schedule changes future
+          // sessions, which is exactly the progression mechanism.
+          sets: sch.sets,
+          reps: sch.reps,
+          status: rec ? rec.status : "pending", // "done" | "skipped" | "pending"
+        });
+      }
+    }
+
+    // Today view is ordered by time of day.
+    slots.sort((a, b) => a.time.localeCompare(b.time));
+    return slots;
+  }
+
+  return { dueSessions, weekdayOf };
+})();
+
+/* ---------------------------------------------------------------------------
+   sessions — turning a tap into a SessionRecord. Done and Skip are the only
+   two actions. Re-marking the same slot updates its record (no duplicates);
+   "undo" removes it so the slot goes back to pending.
+--------------------------------------------------------------------------- */
+const sessions = (() => {
+  // Mark a due slot. `slot` is one item from schedule.dueSessions().
+  function mark(dateStr, slot, status) {
+    const list = store.getRecords();
+    const i = list.findIndex(
+      (r) => r.exerciseId === slot.exerciseId && r.date === dateStr && r.time === slot.time
+    );
+
+    if (i !== -1) {
+      // Same slot tapped again — just flip the status and re-stamp the time.
+      list[i] = { ...list[i], status, markedAt: util.nowIso() };
+    } else {
+      // Fresh record. Snapshot name + target so history can never drift.
+      list.push({
+        id: util.id("rec"),
+        exerciseId: slot.exerciseId,
+        exerciseName: slot.exerciseName,
+        date: dateStr,
+        time: slot.time,
+        targetSets: slot.sets,
+        targetReps: slot.reps,
+        status,
+        markedAt: util.nowIso(),
+      });
+    }
+    store.setRecords(list);
+  }
+
+  // Undo a mark — drop the record entirely; the slot returns to pending.
+  function clear(dateStr, slot) {
+    const list = store.getRecords().filter(
+      (r) => !(r.exerciseId === slot.exerciseId && r.date === dateStr && r.time === slot.time)
+    );
+    store.setRecords(list);
+  }
+
+  return { mark, clear };
+})();
+
+/* ---------------------------------------------------------------------------
+   ui — rendering + event wiring. Plain DOM, one screen visible at a time.
+--------------------------------------------------------------------------- */
+const ui = (() => {
+  const DAY_LABELS = ["S", "M", "T", "W", "T", "F", "S"]; // Sun-first, index 0..6
+  const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+  // Holds the exercise currently open in the edit screen (null = brand new).
+  let editingId = null;
+
+  const $ = (sel) => document.querySelector(sel);
+
+  // ---- screen switching --------------------------------------------------
+  function show(screen) {
+    for (const s of document.querySelectorAll(".screen")) {
+      s.hidden = s.id !== "screen-" + screen;
+    }
+    // Keep the bottom nav's highlight in sync (Today/Exercises only).
+    for (const btn of document.querySelectorAll("nav.tabs button")) {
+      const go = btn.dataset.go;
+      const active = (go === "today" && screen === "today") ||
+        (go === "exercises" && (screen === "exercises" || screen === "edit"));
+      if (active) btn.setAttribute("aria-current", "page");
+      else btn.removeAttribute("aria-current");
+    }
+    window.scrollTo(0, 0);
+  }
+
+  // ---- TODAY -------------------------------------------------------------
+  function renderToday() {
+    const today = util.localDate();
+    const slots = schedule.dueSessions(today, exercises.all(), store.getRecords());
+    const list = $("#todayList");
+    list.innerHTML = "";
+
+    if (slots.length === 0) {
+      list.innerHTML = emptyToday();
+      return;
+    }
+
+    for (const slot of slots) {
+      list.appendChild(todayCard(today, slot));
+    }
+  }
+
+  function emptyToday() {
+    const haveAny = exercises.all().length > 0;
+    if (!haveAny) {
+      return `<div class="empty">
+        <p>Nothing scheduled yet.</p>
+        <p>Add an exercise and give it a schedule to see it here.</p>
+      </div>`;
+    }
+    return `<div class="empty">
+      <p>Nothing due today.</p>
+      <p>Enjoy the rest day — or schedule something in Exercises.</p>
+    </div>`;
+  }
+
+  function todayCard(dateStr, slot) {
+    const card = document.createElement("div");
+    card.className = "card";
+
+    const targetHtml = `<div class="target">${slot.sets}<span class="x">×</span>${slot.reps}</div>`;
+    const head = `<div class="row">
+        <span class="name">${escape(slot.exerciseName)}</span>
+        <span class="time">${util.prettyTime(slot.time)}</span>
+      </div>${targetHtml}`;
+
+    if (slot.status === "pending") {
+      card.innerHTML = head + `<div class="session-actions">
+          <button class="btn-primary" data-act="done">Done</button>
+          <button class="btn-ghost" data-act="skip">Skip</button>
+        </div>`;
+      card.querySelector('[data-act="done"]').onclick = () => {
+        sessions.mark(dateStr, slot, "done");
+        renderToday();
+      };
+      card.querySelector('[data-act="skip"]').onclick = () => {
+        sessions.mark(dateStr, slot, "skipped");
+        renderToday();
+      };
+    } else {
+      // Already marked — show the state with a quiet Undo.
+      card.classList.add("marked", slot.status);
+      const label = slot.status === "done" ? "✓ Done" : "Skipped";
+      card.innerHTML = head + `<div class="status-line">
+          <span class="status-pill ${slot.status}">${label}</span>
+          <button class="link" data-act="undo">Undo</button>
+        </div>`;
+      card.querySelector('[data-act="undo"]').onclick = () => {
+        sessions.clear(dateStr, slot);
+        renderToday();
+      };
+    }
+    return card;
+  }
+
+  // ---- EXERCISES list ----------------------------------------------------
+  function renderExercises() {
+    const list = $("#exList");
+    list.innerHTML = "";
+    const items = exercises.all();
+
+    if (items.length === 0) {
+      list.innerHTML = `<div class="empty">
+        <p>No exercises yet.</p>
+        <p>Add Push-ups or Squats to get going.</p>
+      </div>`;
+      return;
+    }
+
+    for (const ex of items) {
+      const btn = document.createElement("button");
+      btn.className = "ex-item";
+      btn.innerHTML = `<div class="card">
+          <div class="row"><span class="name">${escape(ex.name)}</span></div>
+          ${scheduleSummary(ex)}
+        </div>`;
+      btn.onclick = () => openEdit(ex.id);
+      list.appendChild(btn);
+    }
+  }
+
+  // One-line plain-English summary of an exercise's schedule.
+  function scheduleSummary(ex) {
+    if (!ex.schedule) {
+      return `<div class="ex-summary none">No schedule — idle</div>`;
+    }
+    const days = ex.schedule.days.map((d) => DAY_SHORT[d]).join(", ");
+    const times = ex.schedule.times.map(util.prettyTime).join(", ");
+    const target = `${ex.schedule.sets}×${ex.schedule.reps}`;
+    return `<div class="ex-summary">${days} · ${times} · ${target}</div>`;
+  }
+
+  // ---- EDIT exercise -----------------------------------------------------
+  // selected day set + working list of time strings live here while editing.
+  let editDays = new Set();
+  let editTimes = [];
+
+  function openEdit(id) {
+    editingId = id;
+    const ex = id ? exercises.byId(id) : null;
+
+    $("#editTitle").textContent = ex ? "Edit exercise" : "New exercise";
+    $("#exName").value = ex ? ex.name : "";
+    $("#deleteExerciseBtn").hidden = !ex;
+
+    const hasSchedule = !!(ex && ex.schedule);
+    $("#exScheduled").checked = hasSchedule;
+
+    if (hasSchedule) {
+      editDays = new Set(ex.schedule.days);
+      editTimes = [...ex.schedule.times];
+      $("#exSets").value = ex.schedule.sets;
+      $("#exReps").value = ex.schedule.reps;
+    } else {
+      // Sensible starting point for a new schedule: Mon/Wed/Fri, one 7am slot.
+      editDays = new Set([1, 3, 5]);
+      editTimes = ["07:00"];
+      $("#exSets").value = 2;
+      $("#exReps").value = 10;
+    }
+
+    renderDayChips();
+    renderTimes();
+    reflectScheduledToggle();
+    show("edit");
+    $("#exName").focus();
+  }
+
+  function renderDayChips() {
+    const box = $("#dayChips");
+    box.innerHTML = "";
+    for (let d = 0; d < 7; d++) {
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "day-chip";
+      chip.textContent = DAY_LABELS[d];
+      chip.setAttribute("aria-label", DAY_SHORT[d]);
+      chip.setAttribute("aria-pressed", editDays.has(d) ? "true" : "false");
+      chip.onclick = () => {
+        if (editDays.has(d)) editDays.delete(d);
+        else editDays.add(d);
+        chip.setAttribute("aria-pressed", editDays.has(d) ? "true" : "false");
+      };
+      box.appendChild(chip);
+    }
+  }
+
+  function renderTimes() {
+    const box = $("#timesList");
+    box.innerHTML = "";
+    editTimes.forEach((t, idx) => {
+      const row = document.createElement("div");
+      row.className = "time-row";
+      const input = document.createElement("input");
+      input.type = "time";
+      input.value = t;
+      input.onchange = () => { editTimes[idx] = input.value; };
+      row.appendChild(input);
+
+      // Let the user remove the 2nd+ slot. Keep at least one time around.
+      if (editTimes.length > 1) {
+        const rm = document.createElement("button");
+        rm.type = "button";
+        rm.className = "btn-ghost";
+        rm.textContent = "Remove";
+        rm.onclick = () => { editTimes.splice(idx, 1); renderTimes(); updateAddTimeBtn(); };
+        row.appendChild(rm);
+      }
+      box.appendChild(row);
+    });
+    updateAddTimeBtn();
+  }
+
+  // v0.1 caps the UI at 2 times (data model allows more — future bump).
+  function updateAddTimeBtn() {
+    $("#addTimeBtn").hidden = editTimes.length >= 2;
+  }
+
+  // Show/hide the whole schedule block based on the toggle.
+  function reflectScheduledToggle() {
+    const on = $("#exScheduled").checked;
+    $("#scheduleFields").hidden = !on;
+    $("#schedHint").hidden = on;
+  }
+
+  function saveEdit() {
+    const name = $("#exName").value.trim();
+    if (!name) { $("#exName").focus(); return; }
+
+    const scheduled = $("#exScheduled").checked;
+    let scheduleObj = null;
+
+    if (scheduled) {
+      // Basic guard: a schedule needs at least one day and one time.
+      if (editDays.size === 0) { alert("Pick at least one day, or turn Scheduled off."); return; }
+      const times = editTimes.filter(Boolean);
+      if (times.length === 0) { alert("Add at least one time, or turn Scheduled off."); return; }
+      scheduleObj = exercises.makeSchedule({
+        days: [...editDays],
+        times,
+        sets: $("#exSets").value,
+        reps: $("#exReps").value,
+      });
+    }
+
+    if (editingId) {
+      exercises.update(editingId, { name, schedule: scheduleObj });
+    } else {
+      const ex = exercises.create(name);
+      exercises.update(ex.id, { schedule: scheduleObj });
+    }
+
+    renderExercises();
+    renderToday();
+    show("exercises");
+  }
+
+  function deleteEdit() {
+    if (!editingId) return;
+    const ex = exercises.byId(editingId);
+    if (!confirm(`Delete "${ex ? ex.name : "this exercise"}"? Past history is kept.`)) return;
+    exercises.remove(editingId);
+    renderExercises();
+    renderToday();
+    show("exercises");
+  }
+
+  // Tiny HTML escaper so a user-typed name can't break the markup.
+  function escape(str) {
+    return String(str).replace(/[&<>"']/g, (c) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+    }[c]));
+  }
+
+  // ---- wiring ------------------------------------------------------------
+  function wire() {
+    for (const btn of document.querySelectorAll("nav.tabs button")) {
+      btn.onclick = () => {
+        const go = btn.dataset.go;
+        if (go === "today") { renderToday(); show("today"); }
+        else { renderExercises(); show("exercises"); }
+      };
+    }
+    $("#addExerciseBtn").onclick = () => openEdit(null);
+    $("#exScheduled").onchange = reflectScheduledToggle;
+    $("#addTimeBtn").onclick = () => {
+      if (editTimes.length >= 2) return;
+      editTimes.push("14:00"); // a reasonable second slot to start from
+      renderTimes();
+    };
+    $("#saveExerciseBtn").onclick = saveEdit;
+    $("#cancelEditBtn").onclick = () => { renderExercises(); show("exercises"); };
+    $("#deleteExerciseBtn").onclick = deleteEdit;
+  }
+
+  return { wire, renderToday, renderExercises, show };
+})();
+
+/* ---------------------------------------------------------------------------
+   boot — first run, header subtitle, initial render, and service-worker
+   registration so the app installs and runs offline (Phase 2).
+--------------------------------------------------------------------------- */
+const boot = (() => {
+  const WEEKDAY = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const MONTH = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  // Register the service worker, but only where it's supported and won't get in
+  // the way. Relative "./sw.js" keeps us working from a GitHub Pages subpath.
+  // It's a progressive enhancement — if any of this fails the app still runs.
+  function registerServiceWorker() {
+    if (!("serviceWorker" in navigator)) return;
+    // Wait for load so registration never competes with first paint.
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("./sw.js", { scope: "./" })
+        .catch((err) => console.warn("SW registration failed:", err));
+    });
+  }
+
+  function start() {
+    store.ensureSchema();
+
+    // First-ever launch: seed the two default suggestions, unscheduled, so the
+    // Exercises screen isn't a blank wall. The user schedules them when ready.
+    const settings = store.getSettings();
+    if (!settings.seeded) {
+      if (exercises.all().length === 0) {
+        exercises.create("Push-ups");
+        exercises.create("Squats");
+      }
+      store.setSettings({ ...settings, seeded: true, lastOpenedAt: util.nowIso() });
+    } else {
+      store.setSettings({ ...settings, lastOpenedAt: util.nowIso() });
+    }
+
+    // Friendly date line under the title.
+    const now = new Date();
+    document.getElementById("appSub").textContent =
+      `${WEEKDAY[now.getDay()]}, ${MONTH[now.getMonth()]} ${now.getDate()}`;
+
+    ui.wire();
+    ui.renderToday();
+    ui.renderExercises();
+    ui.show("today");
+
+    registerServiceWorker();
+  }
+
+  return { start };
+})();
+
+document.addEventListener("DOMContentLoaded", boot.start);
+</script>
+</body>
+</html>

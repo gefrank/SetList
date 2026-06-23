@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 /tmp/claude-1000/-mnt-c-users-gefra-repos-SetList/0ae19b48-dcd3-43cf-afeb-46db07702d66/scratchpad/genicons.py)",
+      "Bash(python3 -c \"from PIL import Image; [print\\(f, Image.open\\(f\\).size, Image.open\\(f\\).mode\\) for f in ['/mnt/c/users/gefra/repos/SetList/icons/icon-192.png','/mnt/c/users/gefra/repos/SetList/icons/icon-512.png']]\")",
+      "Bash(node -e \"const m=require\\('./manifest.json'\\); console.log\\('OK:', m.name, '| start_url', m.start_url, '| icons', m.icons.length\\)\")",
+      "Bash(node --check sw.js)",
+      "Bash(node /tmp/claude-1000/-mnt-c-users-gefra-repos-SetList/0ae19b48-dcd3-43cf-afeb-46db07702d66/scratchpad/test.js)"
+    ]
+  }
+}
