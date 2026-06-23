@@ -5,6 +5,49 @@ Format loosely follows Keep a Changelog; versions follow SemVer-ish intent.
 
 ---
 
+## [0.3.1] — Reminders: recurring-day guidance
+### Changed
+- Set alarm helper now points at the exercise's repeat days. The weekday list is
+  baked into the alarm name (e.g. "SetList — Push-ups (Mon, Wed, Fri)") and a live
+  line tells the user to turn on Repeat for exactly those days when the Clock app
+  opens. The day list updates as days/name/times are edited.
+- Service worker cache bumped `setlist-v2` → `setlist-v3` so the update reaches
+  installed devices.
+
+### Why not EXTRA_DAYS directly
+- `AlarmClock.EXTRA_DAYS` is an `ArrayList<Integer>` of Calendar constants
+  (Sun=1 … Sat=7), settable only from native code via `putIntegerArrayListExtra`.
+  A web PWA can only reach the Clock app through a Chrome `intent:` URL, and that
+  URI format (`Intent.toUri`/`parseUri`) encodes **only scalar** extras — arrays
+  are silently dropped before they reach the Clock app. So a true recurring system
+  alarm can't be created from the web; the label + Repeat hint is the honest path
+  (two taps to a recurring alarm). The Calendar mapping (index + 1) is documented
+  in code for a future native build (Phase 7), where EXTRA_DAYS would work.
+
+---
+
+## [0.3.0] — Reminders (native-alarm helper)
+### Added
+- `reminders` module in `SetList.html`: builds an Android `ACTION_SET_ALARM`
+  `intent:` URL (hour, minute, and a "SetList — <exercise>" label) and hands each
+  planned time to the phone's Clock app. Pure URL builder + a try/catch launcher
+  and an Android check.
+- Edit Exercise screen now shows a Reminders section: one "Set alarm" button per
+  scheduled time, a short line explaining the model, and an always-visible
+  fallback instruction to add alarms by hand. Off Android, the button explains the
+  manual route instead of firing a dead link. Rows stay in sync as times/name are
+  edited.
+
+### Changed
+- Service worker cache bumped `setlist-v1` → `setlist-v2` so the update actually
+  reaches installed devices instead of being served from the old cache.
+
+### Explicitly NOT done (by design)
+- No web Notification permission, no service-worker notification scheduling, no
+  Notification Triggers API. Native phone alarms are the only reminder mechanism.
+
+---
+
 ## [0.2.0] — PWA foundation
 ### Added
 - `manifest.json` — installable as "SetList", `display: standalone`, portrait,
