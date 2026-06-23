@@ -11,7 +11,7 @@
  * works at the root or in a subfolder without edits.
  */
 
-const CACHE = "setlist-v3";
+const CACHE = "setlist-v4";
 
 // The app shell to pre-cache on install. Keep this list in sync with the files
 // the app actually needs to boot offline.

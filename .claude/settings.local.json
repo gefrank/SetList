@@ -8,7 +8,8 @@
       "Bash(node /tmp/claude-1000/-mnt-c-users-gefra-repos-SetList/0ae19b48-dcd3-43cf-afeb-46db07702d66/scratchpad/test.js)",
       "WebSearch",
       "WebFetch(domain:gadgetbridge.org)",
-      "WebFetch(domain:android.googlesource.com)"
+      "WebFetch(domain:android.googlesource.com)",
+      "Bash(cd *)"
     ]
   }
 }

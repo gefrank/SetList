@@ -102,7 +102,7 @@ If guaranteed in-app scheduling is ever wanted, that's a Capacitor → native AP
 | 0     | Documentation + project scaffold         | Complete    |
 | 1     | v0.1 core: exercises, schedules, mark-done| Complete    |
 | 2     | PWA foundation (manifest, sw, icons)     | Complete    |
-| 3     | Reminders (native-alarm helper)          | Complete    |
+| 3     | Reminders (Add to Google Calendar)       | Complete    |
 | 4     | History & progression view               | Not started |
 | 5     | Polish, export/backup                    | Not started |
 | 6     | (Optional) scheduled future changes      | Not started |

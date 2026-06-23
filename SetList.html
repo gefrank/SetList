@@ -346,16 +346,15 @@
         </div>
       </div>
 
-      <!-- Native-alarm helper (Phase 3). SetList never fires its own notifications;
-           these buttons just hand each time to the phone's Clock app. The list and
-           the instruction below are always visible so the user is never stuck. -->
+      <!-- Reminder helper (Phase 3.2). SetList never fires its own notifications;
+           each button opens Google Calendar (plain https) with a recurring event
+           prefilled for the schedule's days — Calendar handles the reminders. -->
       <label class="field">Reminders</label>
-      <p class="hint">SetList shows your planned times — set matching alarms in your
-        phone's Clock app so you're reliably notified even when the app is closed.</p>
-      <p class="hint" id="reminderRepeat"></p>
+      <p class="hint">Tap to open Google Calendar with a recurring event prefilled for
+        your scheduled days — review and tap Save. Calendar handles the reminders.</p>
       <div id="reminderList"></div>
-      <p class="hint">No alarm dialog? Open your phone's Clock app and add an alarm by
-        hand for each time above, turning on Repeat for your scheduled days.</p>
+      <p class="hint">One-way: this creates a calendar event now. Editing this schedule
+        later won't change an event you've already saved.</p>
     </div>
 
     <div class="form-actions">
@@ -623,46 +622,81 @@ const sessions = (() => {
 })();
 
 /* ---------------------------------------------------------------------------
-   reminders — the native-alarm helper. SetList does NOT fire its own
-   notifications (web scheduling on Android Chrome is unreliable). Instead we
-   hand each planned time to the phone's Clock app via an Android SET_ALARM
-   intent, so the OS does the reliable nudging. The intent is a bonus; the UI
-   always shows the times plainly so the user can set alarms by hand too.
+   calendar — the reminder helper. We tried the Android SET_ALARM intent first,
+   but on a real device the Clock app doesn't handle the web intent (and the
+   repeat-days array can't ride a web intent URL anyway), so it did nothing.
+   Google Calendar's render-template URL works over plain https everywhere: it
+   opens Calendar with a RECURRING event prefilled for the schedule's days, and
+   Calendar then owns the actual reminders. It's a one-way hand-off — we build
+   the event once; later schedule edits don't touch an already-saved event.
+   All functions here are pure (except openEvent) so the URL building is testable.
 --------------------------------------------------------------------------- */
-const reminders = (() => {
-  // Build the Android "set alarm" intent URL for an "HH:MM" time + a label.
-  // Kept pure so it's easy to test. Extra-type prefixes in an intent: URL are
-  // i.=int, S.=String, B.=boolean (see Android's Intent.toUri format).
-  function alarmIntentUrl(hhmm, label) {
-    const [h, m] = hhmm.split(":").map(Number);
-    return "intent:#Intent;action=android.intent.action.SET_ALARM" +
-      ";i.android.intent.extra.alarm.HOUR=" + h +
-      ";i.android.intent.extra.alarm.MINUTES=" + m +
-      ";S.android.intent.extra.alarm.MESSAGE=" + encodeURIComponent(label) +
-      // Leave SKIP_UI off so the Clock app opens prefilled and the user confirms.
-      ";B.android.intent.extra.alarm.SKIP_UI=false" +
-      ";end";
+const calendar = (() => {
+  // RRULE day codes, indexed to match our 0=Sun … 6=Sat day numbers.
+  const RRULE_DAYS = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
+
+  const pad = (n) => String(n).padStart(2, "0");
+
+  // Schedule days -> RRULE BYDAY list, e.g. [1,3,5] -> "MO,WE,FR".
+  function byDay(daysArr) {
+    return [...daysArr].sort((a, b) => a - b).map((d) => RRULE_DAYS[d]).join(",");
   }
 
-  // Hand the time to the Clock app. Returns true if we managed to launch it,
-  // false otherwise — either way the caller keeps the fallback text on screen.
-  function openAlarm(hhmm, label) {
+  // The next date (today counts) whose weekday is one of daysArr. Returned as a
+  // local Date at that day's midnight; the caller layers the time-of-day on top.
+  function nextMatchingDate(daysArr, fromDate) {
+    const want = new Set(daysArr);
+    for (let off = 0; off < 7; off++) {
+      const d = new Date(fromDate.getFullYear(), fromDate.getMonth(), fromDate.getDate() + off);
+      if (want.has(d.getDay())) return d;
+    }
+    // No days picked — just fall back to the reference date.
+    return new Date(fromDate.getFullYear(), fromDate.getMonth(), fromDate.getDate());
+  }
+
+  // "YYYYMMDDTHHMMSS" in LOCAL time. No trailing Z — Google reads a bare stamp
+  // as the user's local time, which is exactly what we want.
+  function stampLocal(d) {
+    return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}` +
+      `T${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  }
+
+  // The dates=START/END value for the next matching occurrence at hhmm.
+  function eventDates(daysArr, hhmm, durationMin, fromDate) {
+    const [h, m] = hhmm.split(":").map(Number);
+    const base = nextMatchingDate(daysArr, fromDate);
+    const start = new Date(base.getFullYear(), base.getMonth(), base.getDate(), h, m, 0);
+    const end = new Date(start.getTime() + durationMin * 60000);
+    return stampLocal(start) + "/" + stampLocal(end);
+  }
+
+  // Full Google Calendar "render template" URL for a recurring event.
+  // URLSearchParams takes care of encoding the em dash, ×, RRULE colons, etc.
+  function eventUrl({ name, sets, reps, daysArr, hhmm, durationMin = 15, fromDate = new Date() }) {
+    const params = new URLSearchParams({
+      action: "TEMPLATE",
+      text: `${name} — ${sets}×${reps}`,
+      dates: eventDates(daysArr, hhmm, durationMin, fromDate),
+      recur: `RRULE:FREQ=WEEKLY;BYDAY=${byDay(daysArr)}`,
+      details: "Logged in SetList",
+    });
+    return "https://calendar.google.com/calendar/render?" + params.toString();
+  }
+
+  // Open the prefilled event. New tab when we can; fall back to a plain navigate
+  // if the popup is blocked. Either way it's ordinary https — no intent magic.
+  function openEvent(url) {
     try {
-      window.location.href = alarmIntentUrl(hhmm, label);
+      const w = window.open(url, "_blank", "noopener");
+      if (!w) window.location.href = url;
       return true;
     } catch (err) {
-      console.warn("reminders: couldn't launch alarm intent", err);
+      console.warn("calendar: couldn't open event", err);
       return false;
     }
   }
 
-  // The intent only means anything on Android. We still show the button
-  // everywhere (harmless), but this lets the UI pick the right behaviour.
-  function isAndroid() {
-    return /Android/i.test((navigator && navigator.userAgent) || "");
-  }
-
-  return { alarmIntentUrl, openAlarm, isAndroid };
+  return { byDay, nextMatchingDate, stampLocal, eventDates, eventUrl, openEvent };
 })();
 
 /* ---------------------------------------------------------------------------
@@ -900,30 +934,14 @@ const ui = (() => {
     return sorted.map((d) => DAY_SHORT[d]).join(", ");
   }
 
-  // Build the per-time "Set alarm" rows. The intent only does anything on
-  // Android, so off-Android we explain the manual route instead of firing a
-  // dead link. Either way the fallback instruction in the markup stays visible.
-  //
-  // Recurrence note: EXTRA_DAYS (the repeat-days array) can't be carried by a
-  // Chrome intent: URL — that URI format only encodes scalar extras, so an
-  // ArrayList gets silently dropped before it reaches the Clock app. So instead
-  // we bake the weekday list into the alarm's name and tell the user to flip on
-  // Repeat for those exact days. Two taps and it's a recurring alarm.
+  // Build the per-time "Add to Google Calendar" rows. Each button opens Google
+  // Calendar (plain https) with a recurring event prefilled for the schedule's
+  // days. We read name/sets/reps/days live at click time so the event matches
+  // whatever's currently in the form.
   function renderReminders() {
     const box = $("#reminderList");
     if (!box) return;
     box.innerHTML = "";
-    const name = $("#exName").value.trim() || "this exercise";
-
-    const dayList = formatDays([...editDays]);
-    const repeat = $("#reminderRepeat");
-    if (repeat) {
-      repeat.textContent = editDays.size
-        ? `Your schedule repeats ${dayList} — turn on Repeat for those days when the Clock app opens.`
-        : "";
-    }
-    // Suffix the days onto the alarm name, e.g. "SetList — Push-ups (Mon, Wed, Fri)".
-    const labelDays = editDays.size ? ` (${dayList})` : "";
 
     editTimes.filter(Boolean).forEach((t) => {
       const row = document.createElement("div");
@@ -936,18 +954,15 @@ const ui = (() => {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "btn-ghost";
-      btn.textContent = "Set alarm";
+      btn.textContent = "Add to Google Calendar";
       btn.onclick = () => {
-        const label = `SetList — ${name}${labelDays}`;
-        if (reminders.isAndroid()) {
-          reminders.openAlarm(t, label);
-        } else {
-          // Desktop can't honour the alarm intent — say so plainly (dev aid).
-          alert(`On your Android phone this opens the Clock app prefilled for ` +
-            `${util.prettyTime(t)} ("${label}").\n\n` +
-            `Turn on Repeat for ${dayList || "your scheduled days"} there. ` +
-            `On this device, add the alarm by hand in your Clock app.`);
-        }
+        // A recurring event needs at least one day to repeat on.
+        if (editDays.size === 0) { alert("Pick at least one day first."); return; }
+        const name = $("#exName").value.trim() || "Workout";
+        const sets = Math.max(1, parseInt($("#exSets").value, 10) || 1);
+        const reps = Math.max(1, parseInt($("#exReps").value, 10) || 1);
+        const url = calendar.eventUrl({ name, sets, reps, daysArr: [...editDays], hhmm: t });
+        calendar.openEvent(url);
       };
 
       row.appendChild(when);

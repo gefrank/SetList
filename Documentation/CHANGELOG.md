@@ -5,6 +5,32 @@ Format loosely follows Keep a Changelog; versions follow SemVer-ish intent.
 
 ---
 
+## [0.3.2] — Reminders: Add to Google Calendar
+### Changed
+- Replaced the Set alarm helper with **Add to Google Calendar**. On a real Android
+  device the `ACTION_SET_ALARM` web intent did nothing (the Clock app doesn't handle
+  it, and the repeat-days array can't ride a web intent URL), so the alarm path was
+  dead. The new button opens Google Calendar over plain `https` via the
+  render-template URL with a **recurring event** prefilled:
+  - `text` = "<name> — <sets>×<reps>" (e.g. "Push-ups — 2×10")
+  - `dates` = next upcoming matching day at the scheduled time, 15-minute span, in
+    the user's local time (`YYYYMMDDTHHMMSS/…`)
+  - `recur` = `RRULE:FREQ=WEEKLY;BYDAY=…` from the schedule's days (Mon/Wed/Fri →
+    `MO,WE,FR`)
+  - `details` = "Logged in SetList"
+- Helper text rewritten: tapping opens Calendar with a recurring event prefilled —
+  review and Save; Calendar handles reminders. Notes plainly that it's **one-way**
+  (editing a schedule later won't change an already-saved event).
+- New `calendar` module (replaces `reminders`) with pure, unit-tested helpers:
+  `byDay`, `nextMatchingDate`, `stampLocal`, `eventDates`, `eventUrl`.
+- Service worker cache bumped `setlist-v3` → `setlist-v4` so the update reaches
+  installed devices.
+
+### Removed
+- The non-functional Set alarm intent button and its Clock-app / Repeat-toggle text.
+
+---
+
 ## [0.3.1] — Reminders: recurring-day guidance
 ### Changed
 - Set alarm helper now points at the exercise's repeat days. The weekday list is
